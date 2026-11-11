@@ -202,6 +202,7 @@ def test_crash_recovery_running_jobs_and_browser_relaunch(tmp_path: Path, env_fa
         settings = Settings(
             host="127.0.0.1",
             port=api_port,
+            api_key=None,  # isolate tests from the project's real .env
             default_adapter="local-studio",
             data_dir=data_dir,
             browser_headless=True,
@@ -274,7 +275,19 @@ def test_multiclient_concurrent_requests_and_lan_bind(tmp_path: Path, env_factor
     lan_ip = _detect_lan_ipv4() or "127.0.0.1"
 
     with BackgroundServer(demo_app, demo_port), BackgroundServer(app, api_port, host="0.0.0.0"):
+        # The server binds 0.0.0.0, so prefer the LAN IP — but in sandboxed
+        # environments the host's own LAN IP may not route back to itself
+        # (connections hang or reset), so probe it first and fall back to
+        # loopback. The 0.0.0.0 bind and the concurrency checks still run
+        # either way; only the reachability path changes.
         base = f"http://{lan_ip}:{api_port}"
+        try:
+            with httpx.Client(timeout=3.0) as probe:
+                probe_ok = probe.get(f"{base}/health").status_code == 200
+        except Exception:
+            probe_ok = False
+        if not probe_ok:
+            base = f"http://127.0.0.1:{api_port}"
         headers = {"Authorization": "Bearer lan-key"}
         with httpx.Client(base_url=base, headers=headers, timeout=30.0) as client:
             assert client.post("/api/v1/browser/open-login", json={"adapter": "local-studio"}).status_code == 200
@@ -321,6 +334,7 @@ def test_openai_no_retry_header_and_linux_display_guard(tmp_path: Path, monkeypa
     settings = Settings(
         host="127.0.0.1",
         port=api_port,
+        api_key=None,  # isolate tests from the project's real .env
         default_adapter="local-studio",
         data_dir=tmp_path / "guard_data",
         browser_headless=True,

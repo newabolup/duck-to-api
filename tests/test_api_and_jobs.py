@@ -136,6 +136,7 @@ def test_session_and_history_persist_across_server_restart(tmp_path: Path, env_f
         s1 = Settings(
             host="127.0.0.1",
             port=api_port,
+            api_key=None,  # isolate tests from the project's real .env
             default_adapter="local-studio",
             data_dir=data_dir,
             browser_headless=True,
@@ -163,6 +164,7 @@ def test_session_and_history_persist_across_server_restart(tmp_path: Path, env_f
         s2 = Settings(
             host="127.0.0.1",
             port=api_port,
+            api_key=None,  # isolate tests from the project's real .env
             default_adapter="local-studio",
             data_dir=data_dir,
             browser_headless=True,

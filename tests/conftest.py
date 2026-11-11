@@ -214,6 +214,7 @@ def live_env(tmp_path: Path):
     settings = Settings(
         host="127.0.0.1",
         port=api_port,
+        api_key=None,  # isolate tests from the project's real .env
         default_adapter="local-studio",
         data_dir=tmp_path / "data",
         browser_headless=True,

@@ -84,3 +84,18 @@ async def generate_for_telegram(prompt: str, api_key: str | None = None) -> byte
                 raise RuntimeError(job["error"] or job["status"])
             await asyncio.sleep(2)
 ```
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+xvfb-run -a pytest tests/
+```
+
+The dev extras include `openai` (needed by the SDK compatibility test) and
+`pytest`. Some tests drive a real headed Chromium (manual-auth flow), so run
+under `xvfb-run -a` when there is no display. Note: tests build `Settings`
+without an API key on purpose, so they are isolated from any real `.env` in
+the project directory. The LAN-bind test probes the host's own LAN IP first
+and falls back to loopback when that route does not work (e.g. in sandboxed
+environments).

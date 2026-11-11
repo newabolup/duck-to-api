@@ -140,6 +140,7 @@ def test_duck_ai_adapter_dom_branches(tmp_path: Path, env_factories):
     settings = Settings(
         host="127.0.0.1",
         port=api_port,
+        api_key=None,  # isolate tests from the project's real .env
         default_adapter="duck-sim",
         data_dir=tmp_path / "duck_sim_data",
         browser_headless=True,
