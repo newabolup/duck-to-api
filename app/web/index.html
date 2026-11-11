@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>duck-to-api | Operations Console</title>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("duck_to_api_theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-cluster">
+        <h1 class="wordmark">duck-to-api</h1>
+        <div class="status-chip" id="header-browser-chip" aria-live="polite">
+          <span class="status-dot" id="header-browser-dot" aria-hidden="true"></span>
+          <span id="header-browser-label">Checking Chromium...</span>
+        </div>
+      </div>
+
+      <nav class="main-nav" aria-label="Primary workspace views">
+        <div class="tablist" role="tablist" aria-label="Workspace sections">
+          <button
+            type="button"
+            class="tab-btn"
+            id="tab-operations"
+            role="tab"
+            tabindex="0"
+            aria-selected="true"
+            aria-controls="panel-operations"
+            data-tab="operations"
+          >Operations</button>
+          <button
+            type="button"
+            class="tab-btn"
+            id="tab-playground"
+            role="tab"
+            tabindex="-1"
+            aria-selected="false"
+            aria-controls="panel-playground"
+            data-tab="playground"
+          >Playground</button>
+          <button
+            type="button"
+            class="tab-btn"
+            id="tab-adapters"
+            role="tab"
+            tabindex="-1"
+            aria-selected="false"
+            aria-controls="panel-adapters"
+            data-tab="adapters"
+          >Adapters &amp; API</button>
+        </div>
+      </nav>
+
+      <div class="header-actions">
+        <button type="button" class="btn btn-secondary" id="open-apikey-btn">API Key</button>
+        <button type="button" class="btn btn-secondary" id="theme-toggle-btn" aria-pressed="true">Light theme</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="workspace">
+    <div id="global-alert" class="alert-banner hidden" role="alert">
+      <div class="alert-copy">
+        <strong id="global-alert-title">Notice</strong>
+        <span id="global-alert-message"></span>
+      </div>
+      <div class="alert-actions">
+        <button type="button" class="btn btn-primary hidden" id="global-alert-auth-btn">Open Manual Auth Window</button>
+        <button type="button" class="btn btn-secondary" id="global-alert-dismiss-btn" aria-label="Dismiss notice">Dismiss</button>
+      </div>
+    </div>
+
+    <section id="panel-operations" class="tab-panel" role="tabpanel" aria-labelledby="tab-operations">
+      <section class="panel" aria-labelledby="browser-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="browser-heading">Chromium Session Control</h2>
+            <p class="panel-subtitle">Persistent browser profile keeps cookies and site logins across restarts.</p>
+          </div>
+          <div class="btn-group">
+            <button type="button" class="btn btn-primary" id="btn-manual-auth">Open Manual Auth Window</button>
+            <button type="button" class="btn btn-secondary" id="btn-toggle-headless">Switch to Headed</button>
+            <button type="button" class="btn btn-secondary" id="btn-check-session">Check Duck.ai Session</button>
+            <button type="button" class="btn btn-secondary" id="btn-restart-browser">Restart Browser</button>
+          </div>
+        </div>
+
+        <div class="browser-meta-grid" id="browser-meta-grid">
+          <div class="meta-cell">
+            <span class="meta-label">Process</span>
+            <span class="meta-value" id="meta-running">Loading...</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Display Mode</span>
+            <span class="meta-value" id="meta-mode">-</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Concurrency</span>
+            <span class="meta-value" id="meta-concurrency">-</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Profile Directory</span>
+            <span class="meta-value mono" id="meta-profile">-</span>
+          </div>
+        </div>
+
+        <div id="browser-action-feedback" class="inline-feedback hidden" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="queue-strip" aria-label="Live queue counts">
+        <div class="queue-metric">
+          <span class="queue-label">Queued</span>
+          <span class="queue-value" id="cnt-queued">0</span>
+        </div>
+        <div class="queue-metric">
+          <span class="queue-label">Running</span>
+          <span class="queue-value" id="cnt-running">0</span>
+        </div>
+        <div class="queue-metric">
+          <span class="queue-label">Completed</span>
+          <span class="queue-value" id="cnt-completed">0</span>
+        </div>
+        <div class="queue-metric">
+          <span class="queue-label">Needs Auth</span>
+          <span class="queue-value" id="cnt-needs-auth">0</span>
+        </div>
+        <div class="queue-metric">
+          <span class="queue-label">Failed</span>
+          <span class="queue-value" id="cnt-failed">0</span>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="jobs-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="jobs-heading">Queue &amp; Job History</h2>
+            <p class="panel-subtitle">Every API and Playground request is tracked as a persistent job.</p>
+          </div>
+          <div class="filter-bar">
+            <div class="field-inline">
+              <label for="jobs-status-filter">Status</label>
+              <select id="jobs-status-filter" class="control">
+                <option value="all">All statuses</option>
+                <option value="queued">Queued</option>
+                <option value="running">Running</option>
+                <option value="completed">Completed</option>
+                <option value="needs_auth">Needs Auth</option>
+                <option value="failed">Failed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            <div class="field-inline">
+              <label for="jobs-search-input">Search</label>
+              <input type="search" id="jobs-search-input" class="control" placeholder="Job ID or prompt">
+            </div>
+            <button type="button" class="btn btn-secondary" id="btn-refresh-jobs">Refresh</button>
+          </div>
+        </div>
+
+        <div id="jobs-loading-state" class="state-box">Loading jobs...</div>
+        <div id="jobs-error-state" class="state-box state-error hidden" role="alert">
+          <p id="jobs-error-text">Unable to load jobs.</p>
+          <button type="button" class="btn btn-secondary" id="btn-retry-load-jobs">Retry load</button>
+        </div>
+        <div id="jobs-empty-state" class="state-box hidden">
+          <p id="jobs-empty-text">No jobs yet. Submit a prompt in Playground to run your first image job.</p>
+          <button type="button" class="btn btn-primary" id="btn-empty-goto-pg">Open Playground</button>
+          <button type="button" class="btn btn-secondary hidden" id="btn-reset-job-filters">Reset filters</button>
+        </div>
+
+        <div class="table-wrap hidden" id="jobs-table-wrap">
+          <table class="jobs-table">
+            <thead>
+              <tr>
+                <th scope="col">Job</th>
+                <th scope="col">Preview</th>
+                <th scope="col">Prompt &amp; Diagnostics</th>
+                <th scope="col">Status</th>
+                <th scope="col">Timing</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="logs-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="logs-heading">Live Runtime Logs</h2>
+            <p class="panel-subtitle" id="logs-stream-status">Stream: Connecting...</p>
+          </div>
+          <div class="filter-bar">
+            <div class="field-inline">
+              <label for="logs-level-filter">Level</label>
+              <select id="logs-level-filter" class="control">
+                <option value="ALL">All levels</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-secondary" id="btn-toggle-logs-stream" aria-pressed="false">Pause stream</button>
+            <button type="button" class="btn btn-secondary" id="btn-clear-logs">Clear view</button>
+          </div>
+        </div>
+        <div id="logs-container" class="logs-box" role="log" aria-live="polite">
+          <div class="logs-empty" id="logs-empty-state">Waiting for runtime log events...</div>
+        </div>
+      </section>
+    </section>
+
+    <section id="panel-playground" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-playground">
+      <div class="playground-grid">
+        <section class="panel" aria-labelledby="pg-form-heading">
+          <div class="panel-header">
+            <div>
+              <h2 id="pg-form-heading">Prompt &amp; Edit Workbench</h2>
+              <p class="panel-subtitle">Submit generation or edit jobs through the live queue.</p>
+            </div>
+          </div>
+
+          <form id="pg-form" class="stack-form">
+            <div class="mode-switch" role="group" aria-label="Job mode">
+              <button type="button" class="mode-btn active" id="pg-mode-generate" aria-pressed="true">Generate Image</button>
+              <button type="button" class="mode-btn" id="pg-mode-edit" aria-pressed="false">Edit Image</button>
+            </div>
+
+            <div class="form-field">
+              <label for="pg-adapter">Adapter / Model</label>
+              <select id="pg-adapter" class="control"></select>
+            </div>
+
+            <div class="form-field hidden" id="pg-upload-group">
+              <label for="pg-file-input">Source Image (PNG, JPEG, WebP)</label>
+              <div class="upload-row">
+                <label for="pg-file-input" class="btn btn-secondary upload-label">Choose image file</label>
+                <input type="file" id="pg-file-input" class="sr-only" accept="image/png,image/jpeg,image/webp">
+                <span id="pg-file-name" class="file-name">No file selected</span>
+                <button type="button" class="btn btn-secondary hidden" id="pg-clear-file-btn">Remove</button>
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="pg-prompt">Prompt</label>
+              <textarea
+                id="pg-prompt"
+                class="control"
+                dir="auto"
+                rows="4"
+                required
+                placeholder="Describe the image you want to create or how to edit the uploaded image..."
+              ></textarea>
+            </div>
+
+            <div class="form-row-two">
+              <div class="form-field">
+                <label for="pg-size">Size</label>
+                <select id="pg-size" class="control">
+                  <option value="1024x1024">1024x1024</option>
+                  <option value="1024x1536">1024x1536</option>
+                  <option value="1536x1024">1536x1024</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="pg-response-format">OpenAI Response Format</label>
+                <select id="pg-response-format" class="control">
+                  <option value="url">url</option>
+                  <option value="b64_json">b64_json</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button type="submit" class="btn btn-primary" id="pg-submit-btn">Run Image Job</button>
+              <button type="button" class="btn btn-secondary" id="pg-copy-curl-btn">Copy curl command</button>
+            </div>
+            <p class="inline-feedback hidden" id="pg-form-feedback" role="status"></p>
+          </form>
+
+          <div class="snippet-box">
+            <div class="snippet-header">
+              <h3>Generated API Request</h3>
+            </div>
+            <pre class="code-block" id="pg-curl-preview"></pre>
+          </div>
+        </section>
+
+        <section class="panel visual-stage-panel" aria-labelledby="pg-stage-heading">
+          <div class="panel-header">
+            <div>
+              <h2 id="pg-stage-heading">Visual Output Stage</h2>
+              <p class="panel-subtitle" id="pg-stage-subtitle">Side-by-side input and result preview.</p>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn btn-secondary hidden" id="pg-cancel-active-btn">Cancel Job</button>
+              <button type="button" class="btn btn-secondary hidden" id="pg-send-to-edit-btn">Use Output for Edit</button>
+              <a class="btn btn-primary hidden" id="pg-download-link" href="#" download>Download Image</a>
+            </div>
+          </div>
+
+          <div id="pg-stage-status" class="inline-feedback hidden" role="status" aria-live="polite"></div>
+
+          <div id="pg-stage-empty" class="stage-placeholder">
+            <p>Submit a prompt on the left to queue a job and preview the generated image here.</p>
+          </div>
+
+          <div id="pg-stage-error" class="state-box state-error hidden" role="alert">
+            <p id="pg-stage-error-text"></p>
+            <div class="btn-group">
+              <button type="button" class="btn btn-primary hidden" id="pg-stage-auth-btn">Open Manual Auth Window</button>
+              <button type="button" class="btn btn-secondary hidden" id="pg-stage-retry-btn">Retry Job</button>
+            </div>
+          </div>
+
+          <div id="pg-stage-frames" class="stage-frames hidden">
+            <figure class="stage-figure hidden" id="pg-input-figure">
+              <figcaption>Input Image</figcaption>
+              <div class="aspect-frame">
+                <img id="pg-input-img" src="" alt="Uploaded source image preview" width="512" height="512">
+              </div>
+            </figure>
+            <figure class="stage-figure hidden" id="pg-output-figure">
+              <figcaption id="pg-output-caption">Generated Output</figcaption>
+              <button type="button" class="aspect-frame frame-btn" id="pg-output-inspect-btn" aria-label="Open full resolution image preview">
+                <img id="pg-output-img" src="" alt="Generated image output" width="512" height="512">
+              </button>
+            </figure>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel" aria-labelledby="gallery-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="gallery-heading">Output Gallery</h2>
+            <p class="panel-subtitle">Completed images stored locally in data/outputs.</p>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-refresh-gallery">Refresh gallery</button>
+        </div>
+
+        <div id="gallery-empty-state" class="state-box">
+          <p>No completed images yet. Finished generation and edit jobs appear here automatically.</p>
+        </div>
+        <div id="gallery-grid" class="gallery-grid hidden"></div>
+      </section>
+    </section>
+
+    <section id="panel-adapters" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-adapters">
+      <section class="panel" aria-labelledby="adapters-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="adapters-heading">Registered Site Adapters</h2>
+            <p class="panel-subtitle">Add new target websites by registering a SiteAdapter class in app/adapters/.</p>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-refresh-adapters">Refresh adapters</button>
+        </div>
+        <div id="adapters-loading" class="state-box">Loading registered adapters...</div>
+        <div id="adapters-error" class="state-box state-error hidden" role="alert">
+          <p id="adapters-error-text"></p>
+        </div>
+        <div id="adapters-list" class="adapters-grid hidden"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="api-ref-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="api-ref-heading">API &amp; Telegram Bot Integration</h2>
+            <p class="panel-subtitle">OpenAI-compatible sync endpoints and non-blocking async Job endpoints.</p>
+          </div>
+        </div>
+        <div class="endpoint-list">
+          <div class="endpoint-item">
+            <div class="endpoint-head">
+              <span class="method-tag">POST</span>
+              <code>/v1/images/generations</code>
+            </div>
+            <p>OpenAI-compatible text-to-image endpoint. Add header <code>X-Async-Mode: true</code> to receive <code>202</code> with <code>job_id</code> immediately for Telegram bots.</p>
+          </div>
+          <div class="endpoint-item">
+            <div class="endpoint-head">
+              <span class="method-tag">POST</span>
+              <code>/v1/images/edits</code>
+            </div>
+            <p>OpenAI-compatible multipart image upload + edit prompt endpoint supporting <code>url</code> and <code>b64_json</code> outputs.</p>
+          </div>
+          <div class="endpoint-item">
+            <div class="endpoint-head">
+              <span class="method-tag">POST</span>
+              <code>/api/v1/jobs/generate</code>
+              <span class="method-tag">POST</span>
+              <code>/api/v1/jobs/edit</code>
+            </div>
+            <p>Dedicated queue endpoints returning <code>job_id</code>. Poll <code>GET /api/v1/jobs/{job_id}</code> until status becomes <code>completed</code>, <code>failed</code>, or <code>needs_auth</code>.</p>
+          </div>
+          <div class="endpoint-item">
+            <div class="endpoint-head">
+              <span class="method-tag">GET</span>
+              <code>/files/outputs/{filename}</code>
+            </div>
+            <p>Serves generated PNG, JPEG, or WebP files directly for download or Telegram <code>sendPhoto</code>.</p>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>duck-to-api local operations console</span>
+      <a href="/docs" target="_blank" rel="noopener">OpenAPI Docs (/docs)</a>
+    </div>
+  </footer>
+
+  <dialog id="image-modal" class="modal" aria-labelledby="modal-image-title">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header">
+        <h2 id="modal-image-title">Image Inspection</h2>
+        <button type="button" class="btn btn-secondary" id="close-image-modal-btn" aria-label="Close image inspection dialog">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-images" id="modal-images-row"></div>
+        <dl class="modal-details" id="modal-details"></dl>
+      </div>
+      <div class="modal-footer">
+        <a id="modal-download-link" class="btn btn-primary" href="#" download>Download Output</a>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="apikey-modal" class="modal" aria-labelledby="modal-apikey-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-apikey-title">API Key Configuration</h2>
+        <button type="button" class="btn btn-secondary" id="close-apikey-modal-btn" aria-label="Close API key dialog">Close</button>
+      </div>
+      <form id="apikey-form" class="stack-form modal-body">
+        <p class="panel-subtitle">Set a Bearer token only if DUCK_API_API_KEY is configured on the server.</p>
+        <div class="form-field">
+          <label for="apikey-input">Bearer API Key</label>
+          <input type="password" id="apikey-input" class="control" placeholder="Leave empty when auth is disabled">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="clear-apikey-btn">Clear key</button>
+          <button type="submit" class="btn btn-primary">Save key</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

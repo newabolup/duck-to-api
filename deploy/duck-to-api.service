@@ -1,0 +1,17 @@
+[Unit]
+Description=duck-to-api Browser-to-OpenAI Image Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/duck-to-api
+EnvironmentFile=/opt/duck-to-api/.env
+ExecStart=/opt/duck-to-api/start.sh
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
