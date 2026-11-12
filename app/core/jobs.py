@@ -7,7 +7,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ class JobRecord:
     n: int
     status: str
     input_filename: str | None
+    input_filenames: list[str]
     output_filenames: list[str]
     error: str | None
     created_at: str
@@ -68,6 +69,15 @@ class JobRecord:
             else:
                 output_urls.append(base)
 
+        input_urls: list[str] = []
+        for name in self.input_filenames:
+            base_i = f"/files/uploads/{name}"
+            if api_key:
+                tok_i = sign_file_token(api_key, f"uploads/{name}")
+                input_urls.append(f"{base_i}?token={tok_i}")
+            else:
+                input_urls.append(base_i)
+
         return {
             "id": self.id,
             "job_type": self.job_type,
@@ -79,6 +89,8 @@ class JobRecord:
             "status": self.status,
             "input_filename": self.input_filename,
             "input_url": input_url,
+            "input_filenames": list(self.input_filenames),
+            "input_urls": input_urls,
             "output_filenames": self.output_filenames,
             "output_urls": output_urls,
             "error": self.error,
@@ -120,6 +132,7 @@ class JobStore:
                     n INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL,
                     input_filename TEXT,
+                    input_filenames TEXT NOT NULL DEFAULT '[]',
                     output_filenames TEXT NOT NULL DEFAULT '[]',
                     error TEXT,
                     created_at TEXT NOT NULL,
@@ -130,10 +143,29 @@ class JobStore:
                 )
                 """
             )
+            # Migrate DBs created before input_filenames existed (multi-image edits):
+            # add the column, then backfill it from the single input_filename.
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+            if "input_filenames" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN input_filenames TEXT NOT NULL DEFAULT '[]'")
+                rows = conn.execute(
+                    "SELECT id, input_filename FROM jobs WHERE input_filename IS NOT NULL"
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        "UPDATE jobs SET input_filenames = ? WHERE id = ?",
+                        (json.dumps([row["input_filename"]]), row["id"]),
+                    )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status)")
 
     def _row_to_record(self, row: sqlite3.Row) -> JobRecord:
+        try:
+            input_filenames = json.loads(row["input_filenames"] or "[]")
+        except (KeyError, IndexError, TypeError, ValueError):
+            input_filenames = []
+        if not input_filenames and row["input_filename"]:
+            input_filenames = [row["input_filename"]]
         return JobRecord(
             id=row["id"],
             job_type=row["job_type"],
@@ -144,6 +176,7 @@ class JobStore:
             n=row["n"],
             status=row["status"],
             input_filename=row["input_filename"],
+            input_filenames=input_filenames,
             output_filenames=json.loads(row["output_filenames"] or "[]"),
             error=row["error"],
             created_at=row["created_at"],
@@ -160,9 +193,9 @@ class JobStore:
                     """
                     INSERT INTO jobs (
                         id, job_type, adapter, model, prompt, size, n, status,
-                        input_filename, output_filenames, error, created_at,
+                        input_filename, input_filenames, output_filenames, error, created_at,
                         started_at, finished_at, duration_ms, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.id,
@@ -174,6 +207,7 @@ class JobStore:
                         job.n,
                         job.status,
                         job.input_filename,
+                        json.dumps(job.input_filenames),
                         json.dumps(job.output_filenames),
                         job.error,
                         job.created_at,
@@ -229,7 +263,7 @@ class JobStore:
             return await self.get(job_id)
         serialized: dict[str, Any] = {}
         for k, v in fields.items():
-            if k in ("output_filenames", "metadata"):
+            if k in ("output_filenames", "input_filenames", "metadata"):
                 serialized[k] = json.dumps(v)
             else:
                 serialized[k] = v
@@ -344,6 +378,7 @@ class JobManager:
             n=max(1, min(n, adapter.capabilities.max_images)),
             status="queued",
             input_filename=None,
+            input_filenames=[],
             output_filenames=[],
             error=None,
             created_at=_utc_now(),
@@ -360,7 +395,7 @@ class JobManager:
     async def enqueue_edit(
         self,
         prompt: str,
-        image_bytes: bytes,
+        image_bytes: bytes | list[bytes],
         adapter_or_model: str | None = None,
         size: str | None = None,
         n: int = 1,
@@ -369,7 +404,15 @@ class JobManager:
         adapter = self.registry.get(adapter_or_model)
         if not adapter.capabilities.image_edit:
             raise ValueError(f"Adapter '{adapter.name}' does not support image editing")
-        stored_input = self.storage.save_upload(image_bytes, prefix="edit")
+        images = [image_bytes] if isinstance(image_bytes, (bytes, bytearray)) else list(image_bytes)
+        if not images:
+            raise ValueError("No reference image provided for edit job")
+        max_inputs = adapter.capabilities.max_images
+        if len(images) > max_inputs:
+            raise ValueError(
+                f"Adapter '{adapter.name}' supports at most {max_inputs} reference image(s); got {len(images)}"
+            )
+        stored_inputs = [self.storage.save_upload(raw, prefix="edit") for raw in images]
         job = JobRecord(
             id=f"job_{uuid.uuid4().hex[:12]}",
             job_type="edit",
@@ -379,7 +422,8 @@ class JobManager:
             size=size,
             n=max(1, min(n, adapter.capabilities.max_images)),
             status="queued",
-            input_filename=stored_input.filename,
+            input_filename=stored_inputs[0].filename,
+            input_filenames=[s.filename for s in stored_inputs],
             output_filenames=[],
             error=None,
             created_at=_utc_now(),
@@ -388,16 +432,17 @@ class JobManager:
             duration_ms=None,
             metadata={
                 "options": options or {},
-                "input_dimensions": f"{stored_input.width}x{stored_input.height}",
+                "input_dimensions": f"{stored_inputs[0].width}x{stored_inputs[0].height}",
+                "input_count": len(stored_inputs),
             },
         )
         await self.store.insert(job)
         await self._queue.put(job.id)
         logger.info(
-            "Queued edit job %s (adapter=%s, input=%s)",
+            "Queued edit job %s (adapter=%s, inputs=%d)",
             job.id,
             job.adapter,
-            stored_input.filename,
+            len(stored_inputs),
             extra={"job_id": job.id},
         )
         return job
@@ -461,6 +506,7 @@ class JobManager:
             n=job.n,
             status="queued",
             input_filename=job.input_filename,
+            input_filenames=list(job.input_filenames),
             output_filenames=[],
             error=None,
             created_at=_utc_now(),
@@ -524,14 +570,17 @@ class JobManager:
                             ),
                         )
                     elif job.job_type == "edit":
-                        if not job.input_filename:
+                        filenames = list(job.input_filenames) or (
+                            [job.input_filename] if job.input_filename else []
+                        )
+                        if not filenames:
                             raise AdapterExecutionError("Missing input image filename for edit job")
-                        input_path = self.storage.get_upload_path(job.input_filename)
+                        input_paths = [self.storage.get_upload_path(fn) for fn in filenames]
                         result = await adapter.edit_image(
                             page,
                             EditRequest(
                                 prompt=job.prompt,
-                                image_path=input_path,
+                                image_paths=input_paths,
                                 model=job.model,
                                 size=job.size,
                                 n=job.n,

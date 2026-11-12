@@ -53,7 +53,7 @@ def build_demo_site_app() -> FastAPI:
           <h1>Demo Image Studio</h1>
           <div id="auth-state">checking</div>
           <textarea id="prompt-box"></textarea>
-          <input id="file-box" type="file" accept="image/*">
+          <input id="file-box" type="file" accept="image/*" multiple>
           <button id="run-btn" type="button">Generate</button>
           <div id="status">idle</div>
           <div id="output"></div>
@@ -63,14 +63,16 @@ def build_demo_site_app() -> FastAPI:
             document.getElementById('auth-state').textContent = (hasCookie && hasLs) ? 'ready' : 'locked';
 
             let uploadedName = '';
+            let uploadedNames = [];
             let uploadedDataUrl = '';
             document.getElementById('file-box').addEventListener('change', (e) => {
-              const f = e.target.files[0];
-              if (!f) return;
-              uploadedName = f.name;
+              const files = Array.from(e.target.files || []);
+              if (!files.length) return;
+              uploadedNames = files.map(f => f.name);
+              uploadedName = uploadedNames.join('+');
               const r = new FileReader();
               r.onload = () => { uploadedDataUrl = r.result; };
-              r.readAsDataURL(f);
+              r.readAsDataURL(files[0]);
             });
 
             document.getElementById('run-btn').addEventListener('click', () => {
@@ -126,7 +128,7 @@ class LocalStudioAdapter(SiteAdapter):
         image_edit=True,
         models=["local-studio"],
         sizes=["256x256", "1024x1024"],
-        max_images=1,
+        max_images=4,
     )
 
     def __init__(self, base_url: str) -> None:
@@ -148,15 +150,15 @@ class LocalStudioAdapter(SiteAdapter):
             return SessionCheckResult(status="ready", message="Cookie and localStorage verified.", url=page.url)
         return SessionCheckResult(status="needs_auth", message="Session locked; sign in required.", url=page.url)
 
-    async def _run_studio(self, page: Page, prompt: str, image_path: Path | None) -> bytes:
+    async def _run_studio(self, page: Page, prompt: str, image_paths: list[Path] | None = None) -> bytes:
         self._active += 1
         self.max_observed_concurrency = max(self.max_observed_concurrency, self._active)
         try:
             await page.goto(self.home_url, wait_until="domcontentloaded")
             if await page.text_content("#auth-state") != "ready":
                 raise AdapterManualAuthRequired("Demo studio session is locked")
-            if image_path is not None:
-                await page.set_input_files("#file-box", str(image_path))
+            if image_paths:
+                await page.set_input_files("#file-box", [str(p) for p in image_paths])
                 await page.wait_for_timeout(150)
             await page.fill("#prompt-box", prompt)
             await page.click("#run-btn")
@@ -180,8 +182,8 @@ class LocalStudioAdapter(SiteAdapter):
         return AdapterImageResult(images_bytes=[raw])
 
     async def edit_image(self, page: Page, req: EditRequest) -> AdapterImageResult:
-        raw = await self._run_studio(page, req.prompt, req.image_path)
-        return AdapterImageResult(images_bytes=[raw])
+        raw = await self._run_studio(page, req.prompt, req.image_paths)
+        return AdapterImageResult(images_bytes=[raw], metadata={"input_count": len(req.image_paths)})
 
 
 class BackgroundServer:

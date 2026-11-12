@@ -199,25 +199,37 @@ async def create_image_edit(
     storage: ImageStorage = Depends(get_storage),
     settings: Settings = Depends(get_settings_dep),
 ):
-    source_file = image or (image_array[0] if image_array else None)
-    if source_file is None:
+    uploads: list[UploadFile] = []
+    if image is not None:
+        uploads.append(image)
+    if image_array:
+        uploads.extend(image_array)
+    if not uploads:
         return _openai_error(400, "Missing uploaded image file", "missing_image", err_type="invalid_request_error")
 
-    raw_bytes = await source_file.read(settings.max_upload_bytes + 1)
-    if not raw_bytes:
-        return _openai_error(400, "Uploaded image file is empty", "empty_image", err_type="invalid_request_error")
-    if len(raw_bytes) > settings.max_upload_bytes:
-        return _openai_error(
-            413,
-            f"Uploaded image exceeds max size of {settings.max_upload_bytes // (1024 * 1024)} MB",
-            "payload_too_large",
-            err_type="invalid_request_error",
-        )
+    raw_list: list[bytes] = []
+    for source_file in uploads:
+        raw_bytes = await source_file.read(settings.max_upload_bytes + 1)
+        if not raw_bytes:
+            return _openai_error(
+                400,
+                f"Uploaded image file '{source_file.filename}' is empty",
+                "empty_image",
+                err_type="invalid_request_error",
+            )
+        if len(raw_bytes) > settings.max_upload_bytes:
+            return _openai_error(
+                413,
+                f"Uploaded image exceeds max size of {settings.max_upload_bytes // (1024 * 1024)} MB",
+                "payload_too_large",
+                err_type="invalid_request_error",
+            )
+        raw_list.append(raw_bytes)
 
     try:
         job = await jobs.enqueue_edit(
             prompt=prompt,
-            image_bytes=raw_bytes,
+            image_bytes=raw_list,
             adapter_or_model=model,
             size=size,
             n=n,

@@ -49,7 +49,7 @@ class DuckAiAdapter(SiteAdapter):
         image_edit=True,
         models=["duck-ai"],
         sizes=["1024x1024"],
-        max_images=1,
+        max_images=4,
     )
 
     async def open_for_manual_auth(self, page: Page) -> None:
@@ -255,12 +255,28 @@ class DuckAiAdapter(SiteAdapter):
         await self._enter_image_mode(page)
         baseline_srcs = await self._snapshot_image_sources(page)
 
+        image_paths = list(req.image_paths) or ([req.image_path] if req.image_path else [])
+        if not image_paths:
+            raise AdapterExecutionError("No reference image provided for edit job.")
+
         file_input = page.locator('input[type="file"]').first
         if await file_input.count() == 0:
             raise AdapterExecutionError("Duck.ai DOM selector mismatch: image upload input not found.")
 
-        await file_input.set_input_files(str(req.image_path))
-        await page.wait_for_timeout(1500)
+        if len(image_paths) == 1:
+            await file_input.set_input_files(str(image_paths[0]))
+        else:
+            supports_multiple = await file_input.evaluate("el => !!el.multiple")
+            if not supports_multiple:
+                raise AdapterExecutionError(
+                    f"Duck.ai accepts only one reference image per edit "
+                    f"(got {len(image_paths)}); the upload input does not support multiple files."
+                )
+            await file_input.set_input_files([str(p) for p in image_paths])
+
+        # Give every preview thumbnail time to render so it lands in the baseline
+        # (otherwise a late thumbnail can be mistaken for the edited output).
+        await page.wait_for_timeout(1500 + 500 * (len(image_paths) - 1))
 
         # Record the uploaded preview thumbnail so it is never mistaken for the edited output.
         after_upload_srcs = await self._snapshot_image_sources(page)
@@ -269,5 +285,10 @@ class DuckAiAdapter(SiteAdapter):
         image_bytes = await self._submit_and_collect_image(page, req.prompt, baseline_srcs)
         return AdapterImageResult(
             images_bytes=[image_bytes],
-            metadata={"source_url": page.url, "uploaded_file": req.image_path.name},
+            metadata={
+                "source_url": page.url,
+                "uploaded_file": image_paths[0].name,
+                "uploaded_files": [p.name for p in image_paths],
+                "input_count": len(image_paths),
+            },
         )

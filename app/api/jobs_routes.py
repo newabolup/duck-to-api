@@ -36,7 +36,8 @@ async def enqueue_generate_job(
 
 @router.post("/edit", status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_edit_job(
-    image: UploadFile = File(...),
+    image: UploadFile | None = File(default=None),
+    image_array: list[UploadFile] | None = File(default=None, alias="image[]"),
     prompt: str = Form(..., min_length=1, max_length=8000),
     adapter: str | None = Form(default=None),
     model: str | None = Form(default=None),
@@ -45,18 +46,28 @@ async def enqueue_edit_job(
     jobs: JobManager = Depends(get_jobs),
     settings: Settings = Depends(get_settings_dep),
 ) -> dict:
-    raw_bytes = await image.read(settings.max_upload_bytes + 1)
-    if not raw_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded image file is empty")
-    if len(raw_bytes) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Image exceeds max size of {settings.max_upload_bytes // (1024 * 1024)} MB",
-        )
+    uploads: list[UploadFile] = []
+    if image is not None:
+        uploads.append(image)
+    if image_array:
+        uploads.extend(image_array)
+    if not uploads:
+        raise HTTPException(status_code=400, detail="Missing uploaded image file")
+    raw_list: list[bytes] = []
+    for source_file in uploads:
+        raw_bytes = await source_file.read(settings.max_upload_bytes + 1)
+        if not raw_bytes:
+            raise HTTPException(status_code=400, detail=f"Uploaded image file '{source_file.filename}' is empty")
+        if len(raw_bytes) > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image exceeds max size of {settings.max_upload_bytes // (1024 * 1024)} MB",
+            )
+        raw_list.append(raw_bytes)
     try:
         job = await jobs.enqueue_edit(
             prompt=prompt,
-            image_bytes=raw_bytes,
+            image_bytes=raw_list,
             adapter_or_model=adapter or model,
             size=size,
             n=n,

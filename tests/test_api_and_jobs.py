@@ -80,6 +80,33 @@ def test_full_end_to_end_pipeline(live_env):
         assert job_detail["job_type"] == "edit"
         assert job_detail["status"] == "completed"
         assert job_detail["input_url"].startswith("/files/uploads/")
+        assert job_detail["input_filenames"] == [job_detail["input_filename"]]
+        assert job_detail["metadata"]["input_count"] == 1
+
+        # 5b. Multi-reference edit: two images via image[] — both are kept and both reach the adapter
+        r_multi = client.post(
+            "/v1/images/edits",
+            data={"prompt": "combine both references", "model": "local-studio", "response_format": "url"},
+            files=[
+                ("image[]", ("ref-a.png", _make_png_bytes((10, 200, 90)), "image/png")),
+                ("image[]", ("ref-b.png", _make_png_bytes((200, 40, 160)), "image/png")),
+            ],
+        )
+        assert r_multi.status_code == 200
+        multi_job = client.get(f"/api/v1/jobs/{r_multi.json()['job_id']}").json()
+        assert multi_job["job_type"] == "edit"
+        assert multi_job["status"] == "completed"
+        assert len(multi_job["input_filenames"]) == 2
+        assert multi_job["input_filename"] == multi_job["input_filenames"][0]
+        assert multi_job["metadata"]["input_count"] == 2
+
+        # 5c. Over the cap: 5 reference images are refused (max 4)
+        r_over = client.post(
+            "/v1/images/edits",
+            data={"prompt": "too many refs", "model": "local-studio"},
+            files=[("image[]", (f"ref-{i}.png", _make_png_bytes(), "image/png")) for i in range(5)],
+        )
+        assert r_over.status_code == 400
 
         # 6. Concurrency & Job Management (enqueue 3 async jobs, verify single concurrency, cancel)
         j1 = client.post("/api/v1/jobs/generate", json={"prompt": "SLOW_JOB first"}).json()

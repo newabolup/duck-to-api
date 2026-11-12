@@ -41,11 +41,16 @@ class GenerationRequest:
 @dataclass(slots=True)
 class EditRequest:
     prompt: str
-    image_path: Path
+    image_paths: list[Path] = field(default_factory=list)
     model: str | None = None
     size: str | None = None
     n: int = 1
     options: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def image_path(self) -> Path | None:
+        """First reference image (backward-compat convenience)."""
+        return self.image_paths[0] if self.image_paths else None
 
 
 @dataclass(slots=True)
